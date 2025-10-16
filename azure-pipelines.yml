@@ -1,33 +1,71 @@
-# .NET Desktop
-# Build and run tests for .NET Desktop or Windows classic desktop solutions.
-# Add steps that publish symbols, save build artifacts, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/apps/windows/dot-net
-
 trigger:
-- master
+  branches:
+    include:
+      - master
 
-pool:
-  vmImage: 'windows-latest'
+pr:
+  branches:
+    include:
+      - master
 
-variables:
-  solution: '**/*.sln'
-  buildPlatform: 'Any CPU'
-  buildConfiguration: 'Release'
+stages:
+  - stage: Build
+    displayName: Build and Test
+    jobs:
+      - job: node
+        displayName: Build Node (result)
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '16.x'
+          - script: |
+              cd result
+              npm install
+            displayName: 'npm install (result)'
 
-steps:
-- task: NuGetToolInstaller@1
+      - job: python
+        displayName: Test Python (vote)
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.8'
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r vote/requirements.txt
+              python -m unittest discover -v vote/tests
+            displayName: 'Install deps and run Python unit tests'
 
-- task: NuGetCommand@2
-  inputs:
-    restoreSolution: '$(solution)'
+      - job: java
+        displayName: Build Java (worker)
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: Maven@4
+            inputs:
+              mavenPomFile: 'worker/pom.xml'
+              goals: 'clean package'
+          - task: PublishPipelineArtifact@1
+            inputs:
+              targetPath: 'worker/target'
+              artifact: 'worker-java'
 
-- task: VSBuild@1
-  inputs:
-    solution: '$(solution)'
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
-
-- task: VSTest@2
-  inputs:
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
+      - job: dotnet
+        displayName: Build .NET Core (Worker)
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              packageType: 'sdk'
+              version: '2.1.x'
+          - script: |
+              dotnet build worker/src/Worker/Worker.csproj --configuration Release
+            displayName: 'dotnet build (Worker)'
+          - task: PublishPipelineArtifact@1
+            inputs:
+              targetPath: 'worker/src/Worker/bin/Release/netcoreapp2.0'
+              artifact: 'worker-dotnet'
